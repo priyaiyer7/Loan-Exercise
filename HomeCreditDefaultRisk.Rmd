@@ -1,0 +1,248 @@
+---
+title: "Home Credit Default Risk"
+author: "Rashi Jain, Surya Pavan Malireddy, Priya Rangarajan, Shashikant Jaiswal" 
+date: "July 20, 2018"
+output: 
+  html_document:
+    toc: true
+
+---
+
+###Overview
+#####We are interested in predicting the clients' repayment abilities with a variety of variables that are available. We make use of the Home Credit default risk from kaggle in predicting the defaulters.We make use of the training data provided and perform pre- processing and Exploratory data analysis.
+
+#####https://www.kaggle.com/c/home-credit-default-risk 
+###1. Set working directory and load the application_train.csv file
+
+##### setting the blank values of the dataset as NA with the help of [na.strings = c("NA","na",'')]
+```{r}
+loan.data <- read.csv(file="application_train.csv", header=TRUE, sep=",",na.strings = c("NA","na",''))
+```
+
+##### including all the libraries
+
+```{r dataload, echo=TRUE,message=FALSE}
+library(ggplot2)
+library(e1071)
+library(plyr)
+library(knitr)
+library(mice)
+library(VIM)
+```
+
+### 2. Use summary to get information on the 122 attributes
+
+```{r}
+summary(loan.data)
+```
+
+### 3. Missing Values - analyze missing values in the data
+
+```{r}
+sapply(loan.data, function(x) sum(is.na(x)))
+```
+#####As per the output of sapply(), The columns CNT_CHILDREN and OCCUPATION_TYPE  have missing values.
+#####CNT_CHILDREN - 687 missing values
+#####OCCUPATION_TYPE - 96391 missing values
+
+### 4. Create a box plot comparing AMT_INCOME_TOTAL and AMT_CREDIT are there outliers that should be removed based on the resulting box plot?
+
+#####Plot for Amount Income grouped by Income Type
+```{r}
+ggplot(loan.data,aes(NAME_INCOME_TYPE ,AMT_INCOME_TOTAL,group=NAME_INCOME_TYPE))+
+  geom_boxplot(alpha=0.2,fill="blue",outlier.colour ="red" )+
+  scale_y_log10()+stat_summary(aes(label=round(..y..,2)), fun.y=min,geom="text", size=6)
+```
+#####Box-plot of amount Income grouped by Income type. There are outliers as shown by the box-plot that must be removed
+
+#####Plot for Amount Credit grouped by gender
+```{r}
+ggplot(loan.data,aes(CODE_GENDER ,AMT_CREDIT,group=CODE_GENDER))+
+  geom_boxplot(alpha=0.2,fill="blue",outlier.colour ="red" )+
+  scale_y_log10()+stat_summary(aes(label=round(..y..,2)), fun.y=min,geom="text", size=6)
+```
+#####Box-plot of credit amount grouped by Income type. There are outliers as shown by the box-plot that must be removed
+
+### 5. Create flag variables for the NAME_FAMILY_STATUS categorical attribute
+```{r}
+loan.data$FamilyStatus_Single_Flag <- 0
+loan.data$FamilyStatus_Married_Flag <- 0
+loan.data$FamilyStatus_CivilMarriage_Flag <- 0
+loan.data$FamilyStatus_Widow_Flag <- 0
+loan.data$FamilyStatus_Separated_Flag <- 0
+```
+
+##### NAME_FAMILY_STATUS will be 'unknown' when all flags are 0
+```{r}
+loan.data$FamilyStatus_Single_Flag[loan.data$NAME_FAMILY_STATUS == 'Single / not married'] = 1
+loan.data$FamilyStatus_Married_Flag[loan.data$NAME_FAMILY_STATUS == 'Married'] = 1
+loan.data$FamilyStatus_CivilMarriage_Flag[loan.data$NAME_FAMILY_STATUS == 'Civil marriage'] = 1
+loan.data$FamilyStatus_Widow_Flag[loan.data$NAME_FAMILY_STATUS == 'Widow'] = 1
+loan.data$FamilyStatus_Separated_Flag[loan.data$NAME_FAMILY_STATUS == 'Separated'] = 1
+```
+
+### 6. Standardize AMT_INCOME_TOTAL using Z-Score Standardization. Calculate skewness. Is the attribute normally distributed?
+```{r}
+sd_AMT_INCOME_TOTAL <- sd(loan.data$AMT_INCOME_TOTAL)
+mean_AMT_INCOME_TOTAL <- mean(loan.data$AMT_INCOME_TOTAL)
+sd_AMT_INCOME_TOTAL
+mean_AMT_INCOME_TOTAL
+zscore.AMT_INCOME_TOTAL <- (loan.data$AMT_INCOME_TOTAL - mean_AMT_INCOME_TOTAL) / sd_AMT_INCOME_TOTAL
+par(mfrow=c(1,1))
+hist(zscore.AMT_INCOME_TOTAL, breaks=3000,xlim=c(-5,5), main="histogram of Z-score",
+     xlab="Z score of day mins",ylab="Counts")
+box(which = "plot", lty="solid", col="black")
+
+zscore_AMT_INCOME_TOTAL_skew <- (3*(mean(zscore.AMT_INCOME_TOTAL)-median(zscore.AMT_INCOME_TOTAL))) / sd(zscore.AMT_INCOME_TOTAL)
+zscore_AMT_INCOME_TOTAL_skew
+```
+
+#####Attribute AMT_INCOME_TOTAL is not normally distributed.Its skew value is 0.273882.
+
+### 7. Analyze AMT_INCOME_TOTAL for Outliers using the Z-Score values. show both lower range and upper range outliers.
+```{r}
+length(zscore.AMT_INCOME_TOTAL[zscore.AMT_INCOME_TOTAL>3])
+length(zscore.AMT_INCOME_TOTAL[zscore.AMT_INCOME_TOTAL<-3])
+```
+#####There are 454 upper range outliers and 1 lower range outliers.
+
+
+### 8. Standardize AMT_CREDIT using Z-Score Standardization. Calculate skewness.  Is the attribute normally distributed?
+```{r}
+pop_sd_credit <- sd(loan.data$AMT_CREDIT)*sqrt((length(loan.data$AMT_CREDIT)-1)/(length(loan.data$AMT_CREDIT)))
+pop_mean_credit <- mean(loan.data$AMT_CREDIT)
+zscore.credit <- ( loan.data$AMT_CREDIT- pop_mean_credit) / pop_sd_credit
+hist(zscore.credit, breaks=11,main="histogram of Z-score Credit",
+     xlab="Z score of Credit",ylab="Counts")
+box(which = "plot", lty="solid", col="black")
+
+credit_skew <- (3*(mean(zscore.credit)-median(zscore.credit))) / sd(zscore.credit)
+credit_skew
+```
+#####The AMT_CREDIT is not normally distributed with a skewness of 0.6
+
+### 9. Analyze AMT_CREDIT for Outliers using the Z-Score values. Show both the lower range and upper range outliers
+```{r}
+length(zscore.credit[zscore.credit < -3])
+length(zscore.credit[zscore.credit >3])
+```
+
+#####3255 outliers lie 3 standard deviations away from the mean
+
+
+###10. Using knowledge from 4 through 9, make a decision on removing outliers and transforming for normality in the two attributes and document your decision
+##### The data for the two variables is right skewed
+##### To eliminate skewness and to achieve normality we should use the common transformations like Natural log, square root and inverse square root after this check for the normal probability plot(plot quantiles)
+```{r credistat, echo=TRUE}
+hist(log(loan.data$AMT_INCOME_TOTAL), breaks=15,main="Histogram of log of Amount Income",
+     xlab="Z score of Credit",ylab="Counts",col="blue")
+box(which = "plot", lty="solid", col="black")
+skewness(log(loan.data$AMT_INCOME_TOTAL))
+```
+
+###11. Use binning to discretize AMT_TOTAL_INCOME into five bins named A through E with A being the lowest and E being the highest - name the new attribute CAT_AMT_TOTAL_INCOME
+```{r}
+loan.data$CAT_AMT_INCOME_TOTAL <- cut(
+  loan.data$AMT_INCOME_TOTAL,
+  breaks = c(0, 100000,150000 ,200000 ,250000,117000000),
+  labels = c("A", "B", "C", "D", "E"),
+  right  = TRUE,
+  include.lowest = TRUE
+)
+kable(table(loan.data$CAT_AMT_INCOME_TOTAL))
+```
+
+#####Equal width binning can lead to outliers being included in the bins.Equal width binning after outlier removal is thus recommended.
+#####Normalization can reduce skewness which in turn is caused by outliers and binning after normalization may thus yield useful results.
+
+#####Removing Outliers
+```{r}
+uif_amtincome<-quantile(loan.data$AMT_INCOME_TOTAL,.75)+1.5*IQR(loan.data$AMT_INCOME_TOTAL)
+lif_amtincome<-quantile(loan.data$AMT_INCOME_TOTAL, .25)-1.5*IQR(loan.data$AMT_INCOME_TOTAL)
+attach(loan.data)
+loan1.data<-loan.data[AMT_INCOME_TOTAL<uif_amtincome&AMT_INCOME_TOTAL>lif_amtincome ,]
+```
+
+#####Binning without outliers
+```{r}
+loan1.data$CAT_AMT_INCOME_TOTAL <- cut(
+  loan1.data$AMT_INCOME_TOTAL,
+  breaks = c(0, 100000,150000 ,200000 ,250000,117000000),
+  labels = c("A", "B", "C", "D","E"),
+  right  = TRUE,
+  include.lowest = TRUE
+)
+
+kable(table(loan1.data$CAT_AMT_INCOME_TOTAL))
+```
+
+###11.a Observations about binning
+##### 1. It is important to consult domain expert to know the income brackets to bin the variable accurately.
+##### 2. Also, It is important to remove the outliers before binning so that maximum binnig accuracy is achieved. Outliers can heavily impact the binning process. 
+
+###12. Use MICE to impute appropriate values for the missing values in CNT_CHILDREN (note:  the actual value in each case was 0)
+```{r mice, echo=TRUE}
+loan.child <- subset(loan.data,select=c(CNT_CHILDREN,AMT_CREDIT))
+md.pattern(loan.child)
+mice_plot <- aggr(loan.child, col=c('navyblue','yellow'),
+                  numbers=TRUE, sortVars=TRUE,
+                  labels=names(loan.child), cex.axis=.7,
+                  gap=3, ylab=c("Missing data","Pattern"))
+
+imputed_Data <- mice(loan.child, m=2, maxit = 2, method = 'pmm', seed = 500)
+summary(imputed_Data)
+
+```
+###13 Use the table command to create a contingency table of your choice
+```{r}
+
+contingency_table1  <- table(loan.data$NAME_EDUCATION_TYPE,loan.data$NAME_HOUSING_TYPE)
+kable(contingency_table1)
+```
+
+###14 Get a count of the n way frequency for pairs
+```{r}
+sumtable <- addmargins(contingency_table1, FUN=sum)
+kable(sumtable)
+```
+
+###15 Is the data realistic for DAYS_BIRTH and DAYS_EMPLOYED? Why or why not?
+
+##### create a column to compute the age take the absolute values since the data has negative values
+```{r}
+loan.data$Age <- 0
+loan.data$Age <- abs(loan.data$DAYS_BIRTH)/365
+```
+
+##### create a column to compute the number of working years take the absolute values since the data has negative values
+```{r}
+loan.data$Working_years <- 0
+loan.data$Working_years <- abs(loan.data$DAYS_EMPLOYED)/365
+```
+
+##### check if the data is appropriate by comparing the age and the number of working years
+```{r}
+loan.data$isValid <-0
+loan.data$isValid[loan.data$Age > loan.data$Working_years ] = 1
+loan.data$isValid[loan.data$Age <= loan.data$Working_years ] = 0
+table(loan.data$isValid)
+```
+
+##### we found some of the values as 0 i.e. number of working years> age which is not realistic.So, we can say that the data is not valid as DAYS_BIRTH and DAYS_EMPLOYED are negative numbers and in some of the cases, the value of DAYS_EMPLOYED is also greater than the DAYS_BIRTH
+
+
+###16 What else would you like to do with the data in order to complete EDA and Pre-processing?  What have you learned?
+##### We need to check all the variables of the dataset in order to preprocess them(check for missing values)
+##### Removing duplicate records
+##### Adding index field, Binning numerical variables
+##### Changing categorical variables to flag variables
+##### draw the plots for all the variables and find the outliers 
+##### Deal with the outliers if exists
+##### calculate the skewness, the data is perfectly symmetric if skewness is 0.
+##### if the data is skewed, then we need to apply transformation to the data to achieve the normality like natural log, square root or inverse square root
+##### we can plot the normal distributed curve to check for the normality.
+
+
+
+
+
