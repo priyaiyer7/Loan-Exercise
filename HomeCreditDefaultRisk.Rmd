@@ -1,6 +1,6 @@
 ---
 title: "Home Credit Default Risk"
-author: "Rashi Jain, Surya Pavan Malireddy, Priya Rangarajan, Shashikant Jaiswal" 
+author: "Priya Rangarajan" 
 date: "July 20, 2018"
 output: 
   html_document:
